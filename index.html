@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e0e0f">
+<title>Manutec — Relatórios de Execução</title>
+<!-- jsPDF: geração do PDF direto no navegador (sem backend) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- Supabase: banco de dados online (mesmo padrão do sistema da Tacto) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* ================= TEMA: grafite + dourado Manutec com LEDs neon ================= */
+:root{
+  --bg:#0e0e0f; --panel:#18181a; --panel2:#202023; --line:#34322d;
+  --ink:#f4efe4; --dim:#b3aa99; --faint:#7b7467;
+  --gold:#e0a93b; --gold2:#ffd27a; --danger:#ff6b5e; --ok:#6fe0a0;
+  --glow:0 0 6px rgba(224,169,59,.55),0 0 18px rgba(224,169,59,.25);
+  --r:8px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;-webkit-text-size-adjust:100%}
+body{background-image:radial-gradient(900px 500px at 100% -10%,rgba(224,169,59,.12),transparent 60%),radial-gradient(700px 400px at -10% 110%,rgba(224,169,59,.07),transparent 55%);padding-top:env(safe-area-inset-top)}
+/* faixa LED animada no topo */
+.led{height:3px;background:linear-gradient(90deg,transparent,var(--gold),var(--gold2),var(--gold),transparent);background-size:200% 100%;animation:led 3s linear infinite;box-shadow:var(--glow)}
+@keyframes led{from{background-position:200% 0}to{background-position:-200% 0}}
+.shell{max-width:1100px;margin:0 auto;padding:18px 16px 90px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-bottom:14px}
+.brand{display:flex;align-items:center;gap:12px}
+.brand svg{width:46px;height:46px;filter:drop-shadow(0 0 6px rgba(224,169,59,.6))}
+.brand .n{font-family:Georgia,"Times New Roman",serif;font-weight:700;font-size:30px;line-height:1;background:linear-gradient(180deg,var(--gold2),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.brand .s{font-size:9.5px;letter-spacing:.14em;color:var(--gold);margin-top:3px}
+.clock{font:12px ui-monospace,Consolas,monospace;color:var(--dim);text-align:right;display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);animation:pulse 1.6s infinite}
+@keyframes pulse{50%{opacity:.35}}
+/* abas */
+.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:20px;position:sticky;top:0;background:var(--bg);z-index:20;overflow-x:auto}
+.tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--faint);font-weight:700;font-size:14px;padding:12px 16px;cursor:pointer;white-space:nowrap;transition:.15s}
+.tab:hover{color:var(--dim)}
+.tab.on{color:var(--gold2);border-color:var(--gold);text-shadow:0 0 10px rgba(224,169,59,.6)}
+.tab .c{font:11px ui-monospace,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:1px 7px;margin-left:5px}
+h1{font-size:clamp(22px,3vw,30px);margin:0 0 4px}
+.sub{color:var(--dim);font-size:14px;margin:0 0 18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px;position:relative}
+.card::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;background:var(--gold);box-shadow:var(--glow);border-radius:0 3px 3px 0}
+.card+.card{margin-top:16px}
+.card h2{margin:0 0 14px;font-size:13px;letter-spacing:.1em;color:var(--gold);text-transform:uppercase}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){.grid{grid-template-columns:1fr}}
+.full{grid-column:1/-1}
+label{display:block;font:11.5px ui-monospace,Consolas,monospace;color:var(--faint);margin-bottom:6px;letter-spacing:.03em}
+label i{opacity:.7;font-style:normal}
+input,textarea{width:100%;background:#111112;border:1px solid var(--line);border-radius:6px;color:var(--ink);font:inherit;font-size:15px;padding:11px 12px;outline:none;transition:.15s}
+input:focus,textarea:focus{border-color:var(--gold);box-shadow:var(--glow)}
+textarea{min-height:150px;resize:vertical;line-height:1.5}
+input[type=date]{color-scheme:dark}
+/* área de upload */
+.drop{border:1.5px dashed var(--gold);border-radius:var(--r);padding:22px;text-align:center;color:var(--dim);cursor:pointer;transition:.15s;background:rgba(224,169,59,.04)}
+.drop:hover,.drop.over{box-shadow:var(--glow);background:rgba(224,169,59,.09);color:var(--gold2)}
+.drop b{color:var(--gold2)}
+.prev{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:14px}
+.ph{background:#111112;border:1px solid var(--line);border-radius:6px;overflow:hidden;position:relative}
+.ph img{width:100%;height:110px;object-fit:cover;display:block}
+.ph input{border:0;border-top:1px solid var(--line);border-radius:0;font-size:12.5px;padding:8px}
+.ph .x{position:absolute;top:5px;right:5px;width:26px;height:26px;border-radius:50%;border:1px solid var(--danger);background:rgba(14,14,15,.85);color:var(--danger);cursor:pointer;font-size:15px;line-height:1}
+.ph .num{position:absolute;top:5px;left:5px;font:11px ui-monospace,monospace;background:rgba(14,14,15,.85);color:var(--gold2);padding:2px 7px;border-radius:10px;border:1px solid var(--gold)}
+/* botões */
+.btn{font:600 13px ui-monospace,Consolas,monospace;padding:10px 14px;min-height:40px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--dim);cursor:pointer;transition:.15s;white-space:nowrap}
+.btn:hover{border-color:var(--gold);color:var(--gold2);box-shadow:var(--glow)}
+.btn.pri{background:linear-gradient(180deg,var(--gold2),var(--gold));border-color:var(--gold);color:#1c1405;font-weight:800;box-shadow:var(--glow)}
+.btn.pri:hover{filter:brightness(1.1);color:#1c1405}
+.btn.dan{border-color:rgba(255,107,94,.5);color:var(--danger)}
+.btn.dan:hover{border-color:var(--danger);box-shadow:0 0 10px rgba(255,107,94,.4);color:var(--danger)}
+.btn.sm{padding:6px 10px;min-height:32px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:wait}
+.bar{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.bar .pri{flex:1;min-width:200px;font-size:15px;padding:14px}
+.msg{margin-top:12px;font:13px ui-monospace,monospace;padding:10px;border-radius:6px;display:none}
+.msg.show{display:block}.msg.ok{background:rgba(111,224,160,.1);color:var(--ok);border:1px solid rgba(111,224,160,.35)}.msg.err{background:rgba(255,107,94,.1);color:var(--danger);border:1px solid rgba(255,107,94,.35)}
+/* histórico */
+.tool{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.tool input{flex:1;min-width:200px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font:11px ui-monospace,monospace;letter-spacing:.06em;color:var(--faint);padding:0 10px 10px;border-bottom:1px solid var(--line);text-transform:uppercase}
+td{padding:12px 10px;border-bottom:1px solid #26262a;font-size:14px;vertical-align:middle}
+tr:hover td{background:rgba(224,169,59,.04)}
+.tag{font:12px ui-monospace,monospace;color:var(--gold2);background:rgba(224,169,59,.1);border:1px solid rgba(224,169,59,.35);padding:3px 8px;border-radius:12px}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.empty{text-align:center;padding:50px 10px;color:var(--faint)}
+@media(max-width:760px){
+  table,tbody,tr,td{display:block;width:100%}thead{display:none}
+  tr{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:var(--r);margin-bottom:12px;padding:8px}
+  td{border:0;padding:6px 8px;display:flex;justify-content:space-between;gap:10px}
+  td::before{content:attr(data-l);font:11px ui-monospace,monospace;color:var(--faint);text-transform:uppercase}
+  td.a{display:block}td.a::before{display:none}
+}
+/* selo online/local */
+.ob{display:inline-flex;align-items:center;gap:6px;font:10px ui-monospace,monospace;padding:4px 10px 4px 8px;border-radius:20px;border:1px solid var(--line);color:var(--faint);white-space:nowrap;max-width:60vw;overflow:hidden;text-overflow:ellipsis}
+.ob i{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+.ob.on{border-color:rgba(111,224,160,.45);color:var(--ok);box-shadow:0 0 10px rgba(111,224,160,.2)}
+.ob.on i{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.ob.loc{border-color:rgba(224,169,59,.45);color:var(--gold2)}
+.ob.loc i{background:var(--gold);box-shadow:0 0 8px var(--gold)}
+.clock{flex-wrap:wrap;justify-content:flex-end}
+/* modal */
+.mo{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(3px);display:flex;align-items:flex-start;justify-content:center;padding:4vh 14px;overflow-y:auto;z-index:50}
+.mo[hidden]{display:none}
+.md{background:var(--panel);border:1px solid var(--gold);box-shadow:var(--glow);border-radius:10px;width:100%;max-width:640px}
+.mh{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+.mh h3{margin:0;font-size:16px;color:var(--gold2)}.mh button{background:none;border:0;color:var(--dim);font-size:24px;cursor:pointer}
+.mb{padding:18px}.mb dl{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;margin:0 0 14px;font-size:14px}
+.mb dt{font:11px ui-monospace,monospace;color:var(--faint);text-transform:uppercase;padding-top:3px}.mb dd{margin:0}
+.mb pre{white-space:pre-wrap;font:inherit;font-size:14px;background:#111112;padding:12px;border-radius:6px;border:1px solid var(--line);line-height:1.5;margin:0 0 14px}
+.mb .ph img{height:90px}
+</style>
+</head>
+<body>
+<div class="led"></div>
+<div class="shell">
+
+  <!-- ===== Topo / marca ===== -->
+  <div class="top">
+    <div class="brand">
+      <div><div class="n">Manutec</div><div class="s">ENGENHARIA · MONTAGENS E MANUTENÇÃO INDUSTRIAL - LOCAÇÃO DE EQUIPAMENTOS</div></div>
+    </div>
+    <div class="clock"><span class="ob" id="onlineBadge"><i></i> conectando...</span><span class="dot"></span><span id="clk">—</span></div>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab on" data-v="novo">Novo Relatório</button>
+    <button class="tab" data-v="hist">Histórico / Controle <span class="c" id="cnt">0</span></button>
+  </nav>
+
+  <!-- ================= ABA 1: NOVO RELATÓRIO ================= -->
+  <section id="v-novo">
+    <h1>Novo relatório de execução</h1>
+    <p class="sub">Preencha os dados, anexe as fotos e gere o PDF. O relatório é salvo automaticamente no histórico.</p>
+
+    <div class="card">
+      <h2>01 · Dados gerais</h2>
+      <div class="grid">
+        <div><label for="orc">Nº do orçamento *</label><input id="orc" placeholder="Ex.: 10829-2"></div>
+        <div><label for="ped">Nº do pedido / OC <i>(opcional — oculto no PDF se vazio)</i></label><input id="ped" placeholder="Ex.: 3200024202"></div>
+        <div><label for="cli">Cliente / Solicitante *</label><input id="cli" placeholder="Ex.: Softys - Paulo Leal"></div>
+        <div><label for="dat">Data de execução *</label><input type="date" id="dat"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>02 · Atividade executada</h2>
+      <label for="des">Descrição detalhada *</label>
+      <textarea id="des" placeholder="Descreva as atividades realizadas, equipamentos, materiais, observações técnicas..."></textarea>
+    </div>
+
+    <div class="card">
+      <h2>03 · Registro fotográfico</h2>
+      <div class="drop" id="drop"><b>Toque ou arraste as fotos aqui</b><br><small>Várias imagens · as fotos são ajustadas automaticamente no PDF</small></div>
+      <input type="file" id="file" accept="image/*" multiple hidden>
+      <div class="prev" id="prev"></div>
+    </div>
+
+    <div class="bar">
+      <button class="btn pri" id="gerar">Gerar relatório (PDF)</button>
+      <button class="btn" id="limpar">Limpar</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </section>
+
+  <!-- ================= ABA 2: HISTÓRICO ================= -->
+  <section id="v-hist" hidden>
+    <h1>Histórico / Controle</h1>
+    <p class="sub">Todos os relatórios emitidos neste navegador.</p>
+    <div class="tool">
+      <input id="busca" placeholder="🔎 Buscar por nº de orçamento, pedido ou cliente...">
+      <button class="btn" id="expCsv">Exportar CSV</button>
+      <button class="btn" id="expJson">Exportar JSON</button>
+    </div>
+    <div class="card" style="padding:14px">
+      <table>
+        <thead><tr><th>Orçamento</th><th>Pedido</th><th>Cliente</th><th>Data</th><th>Fotos</th><th>Ações</th></tr></thead>
+        <tbody id="tb"></tbody>
+      </table>
+      <div class="empty" id="vazio" hidden>Nenhum relatório encontrado.</div>
+    </div>
+  </section>
+</div>
+
+<!-- Modal de detalhes -->
+<div class="mo" id="mo" hidden><div class="md">
+  <div class="mh"><h3 id="mt">Detalhes</h3><button id="mc" aria-label="Fechar">&times;</button></div>
+  <div class="mb" id="mbody"></div>
+</div></div>
+
+<script>
+(function(){
+"use strict";
+/* ================= Utilidades ================= */
+var KEY="manutec_relatorios_v1";
+var $=function(i){return document.getElementById(i)};
+var pad=function(n){return n<10?"0"+n:""+n};
+var esc=function(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})};
+var fmtD=function(iso){var p=iso.split("-");return p[2]+"/"+p[1]+"/"+p[0]};
+var today=function(){var d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())};
+/* ===== BANCO ONLINE (Supabase) — mesma tabela "dados_sistema" do sistema da Tacto ===== */
+var SUPABASE_URL='https://ouyagzmwvpibjshtqjgb.supabase.co';       // Project URL (API), ex.: https://xxxx.supabase.co
+var SUPABASE_KEY='sb_publishable_IADJDKQ5bN-jsfyI-A4thw__Qbcb7xF';     // chave publicável (anon/publishable)
+var TIPO="relatorios_manutec";                        // identifica os registros deste sistema na tabela
+var sb=null,ONLINE=false,BERR=null;
+var REL=[];                                           // relatórios em memória (espelho do banco)
+function cacheRead(){try{return JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){return []}}
+function cacheWrite(){ // espelho local (se estourar o limite, guarda sem as fotos)
+  try{localStorage.setItem(KEY,JSON.stringify(REL));return true}catch(e){}
+  try{localStorage.setItem(KEY,JSON.stringify(REL.map(function(r){var c=Object.assign({},r);c.semFotos=(r.fotos||[]).length||r.semFotos||0;c.fotos=[];return c})))}catch(e2){}
+  return false;
+}
+function load(){return REL}
+function badge(){
+  var el=$("onlineBadge");if(!el)return;
+  if(ONLINE){el.className="ob on";el.innerHTML="<i></i> Online — dados salvos no banco"}
+  else{el.className="ob loc";el.innerHTML="<i></i> Modo local — dados salvos só neste navegador"+(BERR?" ("+esc(BERR)+")":"")}
+}
+async function initBackend(){
+  try{
+    if(window.supabase&&SUPABASE_URL.indexOf("http")===0){
+      sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+      var p=await sb.from("dados_sistema").select("id").limit(1); // testa conexão e tabela de verdade
+      if(p.error)throw p.error;
+      ONLINE=true;
+    }
+  }catch(e){console.error(e);BERR=String((e&&(e.message||e.code))||"erro desconhecido");sb=null;ONLINE=false}
+  badge();
+}
+async function dbFetch(){
+  try{
+    var r=await sb.from("dados_sistema").select("conteudo").eq("tipo",TIPO);
+    if(r.error)throw r.error;
+    return{ok:true,items:r.data.map(function(x){return x.conteudo})};
+  }catch(e){console.error(e);BERR=String(e.message||e);badge();return{ok:false,items:[]}}
+}
+async function dbSave(r){
+  var res=await sb.from("dados_sistema").upsert({id:r.id,tipo:TIPO,conteudo:r,atualizado_em:new Date().toISOString()});
+  if(res.error)throw res.error;
+}
+async function dbDelete(id){
+  if(!ONLINE)return;
+  try{var res=await sb.from("dados_sistema").delete().eq("id",id);if(res.error)throw res.error}
+  catch(e){console.error(e);alert("Excluído localmente, mas não foi possível excluir no banco online.")}
+}
+var refreshing=false;
+async function refresh(first){
+  if(!ONLINE||refreshing)return;refreshing=true;
+  try{
+    var res=await dbFetch();
+    if(res.ok){
+      var items=res.items;
+      if(first){ // envia uma única vez o que existia só neste navegador
+        var flag="manutec_migrated_v1",done=false;
+        try{done=!!localStorage.getItem(flag)}catch(e){}
+        if(!done){
+          var ids={};items.forEach(function(x){ids[x.id]=1});
+          var miss=REL.filter(function(x){return x&&x.id&&!ids[x.id]});
+          try{for(var i=0;i<miss.length;i++)await dbSave(miss[i]);items=items.concat(miss);try{localStorage.setItem(flag,"1")}catch(e){}}
+          catch(e){console.error("Migração falhou",e)}
+        }
+      }
+      if(items.length===0&&REL.length>0){ // nunca apaga dados da tela por resposta vazia suspeita
+        BERR="banco retornou vazio (dados locais preservados)";badge();
+      }else{REL=items;cacheWrite()}
+    }
+  }finally{refreshing=false;count();if(!$("v-hist").hidden)renderHist()}
+}
+var fotos=[]; // fotos do formulário atual: {src,leg,w,h}
+function say(t,c){var m=$("msg");m.textContent=t;m.className="msg show "+c;if(c=="ok")setTimeout(function(){m.className="msg"},5000)}
+
+/* relógio */
+setInterval(function(){var d=new Date();$("clk").textContent=pad(d.getDate())+"/"+pad(d.getMonth()+1)+"/"+d.getFullYear()+" "+pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds())},1000);
+
+/* ================= Abas ================= */
+function view(v){
+  $("v-novo").hidden=v!=="novo";$("v-hist").hidden=v!=="hist";
+  document.querySelectorAll(".tab").forEach(function(b){b.classList.toggle("on",b.dataset.v===v)});
+  if(v==="hist")renderHist();window.scrollTo(0,0);
+}
+document.querySelectorAll(".tab").forEach(function(b){b.onclick=function(){view(b.dataset.v)}});
+
+/* ================= Upload de fotos (com compressão) ================= */
+function compress(file){
+  return new Promise(function(res){
+    var r=new FileReader();
+    r.onload=function(){var im=new Image();im.onload=function(){
+      var M=1100,s=Math.min(1,M/Math.max(im.width,im.height));
+      var c=document.createElement("canvas");c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);
+      var x=c.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(im,0,0,c.width,c.height);
+      res({src:c.toDataURL("image/jpeg",.75),leg:"",w:c.width,h:c.height});
+    };im.onerror=function(){res(null)};im.src=r.result};
+    r.onerror=function(){res(null)};r.readAsDataURL(file);
+  });
+}
+function addFiles(list){
+  Promise.all(Array.prototype.map.call(list,compress)).then(function(a){
+    a.forEach(function(f){if(f)fotos.push(f)});renderPrev();
+  });
+}
+function renderPrev(){
+  $("prev").innerHTML=fotos.map(function(f,i){
+    return '<div class="ph"><span class="num">'+pad(i+1)+'</span><button class="x" data-i="'+i+'" title="Remover">&times;</button><img src="'+f.src+'" alt=""><input data-l="'+i+'" placeholder="Legenda (opcional)" value="'+esc(f.leg)+'"></div>';
+  }).join("");
+}
+$("prev").addEventListener("click",function(e){var b=e.target.closest(".x");if(b){fotos.splice(+b.dataset.i,1);renderPrev()}});
+$("prev").addEventListener("input",function(e){if(e.target.dataset.l!=null)fotos[+e.target.dataset.l].leg=e.target.value});
+$("drop").onclick=function(){$("file").click()};
+$("file").onchange=function(){addFiles(this.files);this.value=""};
+["dragover","dragenter"].forEach(function(t){$("drop").addEventListener(t,function(e){e.preventDefault();this.classList.add("over")})});
+["dragleave","drop"].forEach(function(t){$("drop").addEventListener(t,function(e){e.preventDefault();this.classList.remove("over");if(t==="drop")addFiles(e.dataTransfer.files)})});
+
+/* ================= Geração do PDF (jsPDF vetorial) ================= */
+var GOLD=[212,160,67],GRAF=[42,42,42];
+function logo(doc,cx,cy,r){ // engrenagem vetorial
+  doc.setDrawColor.apply(doc,GOLD);
+  doc.setLineDashPattern([1.5,1.3],0);doc.setLineWidth(r*0.38);doc.circle(cx,cy,r,"S");
+  doc.setLineDashPattern([],0);doc.setLineWidth(r*0.16);doc.circle(cx,cy,r*.78,"S");
+  doc.setLineWidth(0.25);doc.circle(cx,cy,r*.6,"S");
+  doc.setTextColor.apply(doc,GOLD);doc.setFont("times","bold");doc.setFontSize(r*2.1);
+  doc.text("M",cx,cy+r*.33,{align:"center"});
+}
+function headerFull(doc){
+  doc.setFillColor.apply(doc,GRAF);doc.rect(0,0,210,40,"F");
+  doc.setFillColor.apply(doc,GOLD);doc.rect(0,40,210,1.2,"F");
+  doc.setTextColor.apply(doc,GOLD);doc.setFont("times","bold");doc.setFontSize(30);doc.text("Manutec",14,21);
+  doc.setFont("helvetica","normal");doc.setFontSize(6.2);doc.text("ENGENHARIA · MONTAGENS E MANUTENÇÃO INDUSTRIAL - LOCAÇÃO DE EQUIPAMENTOS",14,28.5);
+  doc.setTextColor(255,255,255);doc.setFont("helvetica","bold");doc.setFontSize(13);
+  doc.text("RELATÓRIO DE EXECUÇÃO",196,18,{align:"right"});
+  doc.setTextColor.apply(doc,GOLD);doc.text("DE ATIVIDADE",196,25,{align:"right"});
+}
+function headerMini(doc,r){
+  doc.setFillColor.apply(doc,GRAF);doc.rect(0,0,210,14,"F");
+  doc.setFillColor.apply(doc,GOLD);doc.rect(0,14,210,.8,"F");
+  doc.setTextColor.apply(doc,GOLD);doc.setFont("times","bold");doc.setFontSize(13);doc.text("Manutec Engenharia",14,9);
+  doc.setTextColor(255,255,255);doc.setFont("helvetica","normal");doc.setFontSize(8);
+  doc.text("Relatório · Orçamento "+r.orc,196,8.5,{align:"right"});
+}
+function footers(doc){ // rodapé dourado com CNPJ, contatos e paginação
+  var n=doc.getNumberOfPages();
+  for(var i=1;i<=n;i++){
+    doc.setPage(i);
+    doc.setFillColor(214,161,68);doc.rect(0,281,210,16,"F");
+    doc.setTextColor(35,30,22);doc.setFont("helvetica","bold");doc.setFontSize(7.8);
+    doc.text("Manutec Engenharia e Manutenção LTDA  ·  CNPJ 35.471.117/0001-38  ·  (62) 99295-0585",105,287,{align:"center"});
+    doc.setFont("helvetica","normal");doc.setFontSize(7.2);
+    doc.text("manutecengenharia.ind@gmail.com  ·  @manutecengenharia  ·  Rua Orquídea – Aldeia dos Sonhos – Anápolis – GO",105,291,{align:"center"});
+    doc.setFont("helvetica","bold");doc.text("Página "+i+" de "+n,196,295,{align:"right"});
+  }
+}
+function genPDF(r){
+  var J=window.jspdf&&window.jspdf.jsPDF;
+  if(!J){alert("Biblioteca de PDF não carregada. Verifique a conexão e tente novamente.");return}
+  var doc=new J({unit:"mm",format:"a4"}),L=14,W=182,MAXY=274,y;
+  headerFull(doc);
+  /* cards de dados gerais (Pedido omitido se vazio) */
+  var cells=[["ORÇAMENTO",r.orc]];
+  if(r.pedido&&r.pedido.trim())cells.push(["PEDIDO / OC",r.pedido]);
+  cells.push(["CLIENTE / SOLICITANTE",r.cliente],["DATA DE EXECUÇÃO",fmtD(r.data)]);
+  var gap=4,cw=(W-gap*(cells.length-1))/cells.length;y=50;
+  cells.forEach(function(c,i){
+    var x=L+i*(cw+gap);
+    doc.setFillColor(247,243,235);doc.roundedRect(x,y,cw,20,1.5,1.5,"F");
+    doc.setFillColor.apply(doc,GOLD);doc.rect(x,y,1.4,20,"F");
+    doc.setFont("helvetica","bold");doc.setFontSize(6.6);doc.setTextColor(130,120,100);doc.text(c[0],x+4,y+5.5);
+    doc.setFontSize(9.5);doc.setTextColor.apply(doc,GRAF);
+    doc.text(doc.splitTextToSize(String(c[1]),cw-6).slice(0,2),x+4,y+11.5);
+  });
+  y+=30;
+  function sec(t){
+    doc.setFont("helvetica","bold");doc.setFontSize(10);doc.setTextColor.apply(doc,GOLD);doc.text(t,L,y);
+    doc.setDrawColor.apply(doc,GOLD);doc.setLineWidth(.5);doc.line(L,y+2,L+W,y+2);y+=9;
+  }
+  function np(){doc.addPage();headerMini(doc,r);y=24}
+  /* descrição */
+  sec("DESCRIÇÃO DE ATIVIDADES REALIZADAS");
+  doc.setFont("helvetica","normal");doc.setFontSize(10.5);doc.setTextColor(45,42,38);
+  /* texto variável + frase final concatenada (orçamento e data de conclusão) */
+  var txt=r.desc.replace(/\s+$/,"");
+  if(!/[.!?]$/.test(txt))txt+=".";
+  txt+="\n\nReferente ao orçamento "+r.orc+", conclusão na data "+fmtD(r.data)+".";
+  doc.splitTextToSize(txt,W).forEach(function(l){if(y>MAXY)np();doc.text(l,L,y);y+=5.4});
+  y+=8;
+  /* galeria: 2 por linha, imagem ajustada (sem distorcer) dentro do card */
+  var f=r.fotos||[];
+  if(f.length){
+    if(y>MAXY-60)np();
+    sec("REGISTRO FOTOGRÁFICO");
+    var colW=(W-6)/2,maxH=80;
+    for(var i=0;i<f.length;i+=2){
+      var row=f.slice(i,i+2).map(function(p,k){
+        var ratio=p.h/p.w,w=colW-4,h=w*ratio;if(h>maxH){h=maxH;w=h/ratio}
+        return{p:p,w:w,h:h,idx:i+k};
+      });
+      var rowH=Math.max.apply(null,row.map(function(o){return o.h}))+14;
+      if(y+rowH>MAXY+4){np()}
+      row.forEach(function(o,k){
+        var x=L+k*(colW+6);
+        doc.setFillColor(247,243,235);doc.setDrawColor(225,215,195);doc.setLineWidth(.2);
+        doc.roundedRect(x,y,colW,rowH,1.5,1.5,"FD");
+        try{doc.addImage(o.p.src,"JPEG",x+(colW-o.w)/2,y+2,o.w,o.h,undefined,"FAST")}catch(e){}
+        doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor.apply(doc,GOLD);
+        doc.text("FOTO "+pad(o.idx+1),x+3,y+rowH-3.2);
+        if(o.p.leg){doc.setFont("helvetica","normal");doc.setTextColor(70,64,56);doc.text(doc.splitTextToSize(o.p.leg,colW-24)[0],x+17,y+rowH-3.2)}
+      });
+      y+=rowH+5;
+    }
+  }
+  footers(doc);
+  var nome=(r.cliente||"Cliente").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-zA-Z0-9]+/g,"_").replace(/^_+|_+$/g,"");
+  doc.save("Relatorio_"+String(r.orc).replace(/[^a-zA-Z0-9-]+/g,"_")+"_"+nome+".pdf");
+}
+
+/* ================= Gerar relatório (salva + baixa) ================= */
+$("dat").value=today();
+$("gerar").onclick=function(){
+  var r={id:"r"+Date.now().toString(36),orc:$("orc").value.trim(),pedido:$("ped").value.trim(),cliente:$("cli").value.trim(),
+    data:$("dat").value,desc:$("des").value.trim(),fotos:fotos.map(function(f){return{src:f.src,leg:f.leg,w:f.w,h:f.h}}),criado:new Date().toISOString()};
+  if(!r.orc)return say("Informe o número do orçamento.","err");
+  if(!r.cliente)return say("Informe o cliente / solicitante.","err");
+  if(!r.data)return say("Informe a data de execução.","err");
+  if(!r.desc)return say("Descreva a atividade executada.","err");
+  var btn=this;btn.disabled=true;
+  setTimeout(async function(){
+    try{
+      REL.push(r);
+      var okLocal=cacheWrite();
+      genPDF(r);
+      var okDb=true;
+      if(ONLINE){try{await dbSave(r)}catch(e){okDb=false;console.error(e)}}
+      if(ONLINE&&okDb)say("Relatório gerado e salvo no banco online.","ok");
+      else if(ONLINE)say("PDF gerado e salvo neste navegador, mas não foi possível sincronizar com o banco online.","err");
+      else say(okLocal?"Relatório gerado e salvo neste navegador (modo local).":"PDF gerado, mas o armazenamento local está cheio e o banco está offline: fotos não ficam no histórico.",okLocal?"ok":"err");
+      fotos=[];renderPrev();["orc","ped","cli","des"].forEach(function(i){$(i).value=""});$("dat").value=today();count();
+    }catch(e){console.error(e);say("Erro ao gerar o PDF.","err")}
+    btn.disabled=false;
+  },30);
+};
+$("limpar").onclick=function(){fotos=[];renderPrev();["orc","ped","cli","des"].forEach(function(i){$(i).value=""});$("dat").value=today()};
+
+/* ================= Histórico ================= */
+function count(){$("cnt").textContent=load().length}
+function renderHist(){
+  var q=$("busca").value.toLowerCase().trim();
+  var arr=load().filter(function(r){return !q||(r.orc+" "+(r.pedido||"")+" "+r.cliente).toLowerCase().indexOf(q)>-1})
+    .sort(function(a,b){return new Date(b.criado)-new Date(a.criado)});
+  $("vazio").hidden=arr.length>0;
+  $("tb").innerHTML=arr.map(function(r){
+    var nf=(r.fotos||[]).length;
+    return '<tr><td data-l="Orçamento"><b>'+esc(r.orc)+'</b></td><td data-l="Pedido">'+(r.pedido?esc(r.pedido):'<span style="color:var(--faint)">—</span>')+'</td><td data-l="Cliente">'+esc(r.cliente)+'</td><td data-l="Data">'+fmtD(r.data)+'</td><td data-l="Fotos"><span class="tag">'+nf+(r.semFotos?" (+"+r.semFotos+" não salvas)":"")+'</span></td>'+
+      '<td class="a"><div class="acts"><button class="btn sm" data-a="v" data-id="'+r.id+'">Detalhes</button><button class="btn sm pri" data-a="p" data-id="'+r.id+'">Baixar novamente</button><button class="btn sm dan" data-a="x" data-id="'+r.id+'">Excluir</button></div></td></tr>';
+  }).join("");
+  count();
+}
+$("busca").oninput=renderHist;
+$("tb").addEventListener("click",function(e){
+  var b=e.target.closest("button[data-a]");if(!b)return;
+  var arr=load(),r=arr.filter(function(x){return x.id===b.dataset.id})[0];if(!r)return;
+  if(b.dataset.a==="p")genPDF(r);
+  else if(b.dataset.a==="x"){if(confirm('Excluir o relatório do orçamento "'+r.orc+'"?')){REL=REL.filter(function(x){return x.id!==r.id});cacheWrite();dbDelete(r.id);renderHist()}}
+  else{ // detalhes
+    $("mt").textContent="Orçamento "+r.orc;
+    $("mbody").innerHTML='<dl><dt>Orçamento</dt><dd>'+esc(r.orc)+'</dd><dt>Pedido</dt><dd>'+(r.pedido?esc(r.pedido):"—")+'</dd><dt>Cliente</dt><dd>'+esc(r.cliente)+'</dd><dt>Data</dt><dd>'+fmtD(r.data)+'</dd><dt>Emitido em</dt><dd>'+new Date(r.criado).toLocaleString("pt-BR")+'</dd></dl><pre>'+esc(r.desc)+'</pre>'+
+      ((r.fotos||[]).length?'<div class="prev">'+r.fotos.map(function(f,i){return'<div class="ph"><span class="num">'+pad(i+1)+'</span><img src="'+f.src+'" alt="">'+(f.leg?'<div style="padding:6px;font-size:12px;color:var(--dim)">'+esc(f.leg)+'</div>':'')+'</div>'}).join("")+'</div>':'')+
+      '<div class="bar"><button class="btn pri" id="mdl">Baixar novamente</button></div>';
+    $("mdl").onclick=function(){genPDF(r)};$("mo").hidden=false;
+  }
+});
+$("mc").onclick=function(){$("mo").hidden=true};
+$("mo").onclick=function(e){if(e.target===this)this.hidden=true};
+
+/* exportações (sem as imagens, para manter o arquivo leve) */
+function dl(name,mime,txt){var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:mime}));a.download=name;document.body.appendChild(a);a.click();a.remove()}
+$("expJson").onclick=function(){dl("relatorios_manutec.json","application/json",JSON.stringify(load().map(function(r){return{orcamento:r.orc,pedido:r.pedido,cliente:r.cliente,data:r.data,descricao:r.desc,qtd_fotos:(r.fotos||[]).length,criado:r.criado}}),null,2))};
+$("expCsv").onclick=function(){
+  var q=function(v){return '"'+String(v==null?"":v).replace(/"/g,'""').replace(/\r?\n/g," ")+'"'};
+  var rows=[["Orçamento","Pedido","Cliente","Data","Descrição","Fotos","Criado em"].map(q).join(";")];
+  load().forEach(function(r){rows.push([r.orc,r.pedido,r.cliente,fmtD(r.data),r.desc,(r.fotos||[]).length,new Date(r.criado).toLocaleString("pt-BR")].map(q).join(";"))});
+  dl("relatorios_manutec.csv","text/csv;charset=utf-8","\ufeff"+rows.join("\r\n"));
+};
+/* ===== Inicialização: carrega cache local, conecta no banco e mantém sincronizado ===== */
+(async function boot(){
+  REL=cacheRead();count();
+  await initBackend();
+  await refresh(true);
+  count();
+  document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible")refresh()});
+  document.querySelectorAll(".tab").forEach(function(b){b.addEventListener("click",function(){refresh()})});
+  setInterval(refresh,30000);
+})();
+})();
+</script>
+</body>
+</html>
